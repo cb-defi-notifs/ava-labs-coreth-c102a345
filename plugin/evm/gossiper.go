@@ -5,11 +5,13 @@ package evm
 
 import (
 	"container/heap"
+	"context"
 	"math/big"
 	"sync"
 	"time"
 
 	"github.com/ava-labs/avalanchego/codec"
+	"github.com/ava-labs/avalanchego/network/p2p"
 
 	"github.com/ava-labs/coreth/peer"
 
@@ -43,6 +45,8 @@ const (
 	minGossipBatchInterval = 50 * time.Millisecond
 )
 
+var _ p2p.Handler = (*ethTxPushGossipHandler)(nil)
+
 // Gossiper handles outgoing gossip of transactions
 type Gossiper interface {
 	// GossipAtomicTxs sends AppGossip message containing the given [txs]
@@ -56,10 +60,12 @@ type pushGossiper struct {
 	ctx    *snow.Context
 	config Config
 
-	client        peer.NetworkClient
-	blockchain    *core.BlockChain
-	txPool        *txpool.TxPool
-	atomicMempool *Mempool
+	client         peer.NetworkClient
+	ethTxClient    *p2p.Client
+	atomicTxClient *p2p.Client
+	blockchain     *core.BlockChain
+	txPool         *txpool.TxPool
+	atomicMempool  *Mempool
 
 	// We attempt to batch transactions we need to gossip to avoid runaway
 	// amplification of mempol chatter.
@@ -80,7 +86,7 @@ type pushGossiper struct {
 
 // createGossiper constructs and returns a pushGossiper or noopGossiper
 // based on whether vm.chainConfig.ApricotPhase4BlockTimestamp is set
-func (vm *VM) createGossiper(stats GossipStats) Gossiper {
+func (vm *VM) createGossiper(stats GossipStats, ethTxClient *p2p.Client, atomicTxClient *p2p.Client) Gossiper {
 	net := &pushGossiper{
 		ctx:                vm.ctx,
 		config:             vm.config,
@@ -96,6 +102,8 @@ func (vm *VM) createGossiper(stats GossipStats) Gossiper {
 		recentEthTxs:       &cache.LRU[common.Hash, interface{}]{Size: recentCacheSize},
 		codec:              vm.networkCodec,
 		stats:              stats,
+		ethTxClient:        ethTxClient,
+		atomicTxClient:     atomicTxClient,
 	}
 	net.awaitEthTxGossip()
 	return net
@@ -301,7 +309,14 @@ func (n *pushGossiper) gossipAtomicTx(tx *Tx) error {
 		"txID", txID,
 	)
 	n.stats.IncAtomicGossipSent()
-	return n.client.Gossip(msgBytes)
+
+	errs := wrappers.Errs{}
+	errs.Add(
+		n.client.Gossip(msgBytes),
+		n.atomicTxClient.AppGossip(context.TODO(), msgBytes),
+	)
+
+	return errs.Err
 }
 
 func (n *pushGossiper) sendEthTxs(txs []*types.Transaction) error {
@@ -327,7 +342,14 @@ func (n *pushGossiper) sendEthTxs(txs []*types.Transaction) error {
 		"size(txs)", len(msg.Txs),
 	)
 	n.stats.IncEthTxsGossipSent()
-	return n.client.Gossip(msgBytes)
+
+	errs := wrappers.Errs{}
+	errs.Add(
+		n.client.Gossip(msgBytes),
+		n.ethTxClient.AppGossip(context.TODO(), msgBytes),
+	)
+
+	return errs.Err
 }
 
 func (n *pushGossiper) gossipEthTxs(force bool) (int, error) {
@@ -520,4 +542,38 @@ func (h *GossipHandler) HandleEthTxs(nodeID ids.NodeID, msg message.EthTxsGossip
 		h.stats.IncEthTxsGossipReceivedNew()
 	}
 	return nil
+}
+
+type ethTxPushGossipHandler struct {
+	p2p.NoOpHandler
+	*GossipHandler
+
+	codec codec.Manager
+}
+
+func (e ethTxPushGossipHandler) AppGossip(_ context.Context, nodeID ids.NodeID, gossipBytes []byte) error {
+	var gossipMsg message.EthTxsGossip
+	if _, err := e.codec.Unmarshal(gossipBytes, &gossipMsg); err != nil {
+		log.Debug("could not parse eth tx", "nodeID", nodeID, "err", err)
+		return nil
+	}
+
+	return e.GossipHandler.HandleEthTxs(nodeID, gossipMsg)
+}
+
+type atomicTxPushGossipHandler struct {
+	p2p.NoOpHandler
+	*GossipHandler
+
+	codec codec.Manager
+}
+
+func (a atomicTxPushGossipHandler) AppGossip(_ context.Context, nodeID ids.NodeID, gossipBytes []byte) error {
+	var gossipMsg message.AtomicTxGossip
+	if _, err := a.codec.Unmarshal(gossipBytes, &gossipMsg); err != nil {
+		log.Debug("could not parse atomic tx", "nodeID", nodeID, "err", err)
+		return nil
+	}
+
+	return a.GossipHandler.HandleAtomicTx(nodeID, gossipMsg)
 }

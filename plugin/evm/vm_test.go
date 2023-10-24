@@ -124,6 +124,96 @@ func init() {
 	}
 }
 
+func newPrefundedGenesis(addresses []common.Address, balance int) *core.Genesis {
+	alloc := core.GenesisAlloc{}
+	for _, address := range addresses {
+		alloc[address] = core.GenesisAccount{
+			Balance: big.NewInt(int64(balance)),
+		}
+	}
+
+	genesis := newGenesis()
+	genesis.Alloc = alloc
+
+	return genesis
+}
+
+func newGenesis() *core.Genesis {
+	return &core.Genesis{
+		Config: &params.ChainConfig{
+			AvalancheContext: params.AvalancheContext{
+				BlockchainID: common.Hash{},
+			},
+			ChainID:                         big.NewInt(43111),
+			HomesteadBlock:                  big.NewInt(0),
+			DAOForkBlock:                    big.NewInt(0),
+			DAOForkSupport:                  true,
+			EIP150Block:                     big.NewInt(0),
+			EIP155Block:                     big.NewInt(0),
+			EIP158Block:                     big.NewInt(0),
+			ByzantiumBlock:                  big.NewInt(0),
+			ConstantinopleBlock:             big.NewInt(0),
+			PetersburgBlock:                 big.NewInt(0),
+			IstanbulBlock:                   big.NewInt(0),
+			MuirGlacierBlock:                big.NewInt(0),
+			ApricotPhase1BlockTimestamp:     new(uint64),
+			ApricotPhase2BlockTimestamp:     new(uint64),
+			ApricotPhase3BlockTimestamp:     new(uint64),
+			ApricotPhase4BlockTimestamp:     new(uint64),
+			ApricotPhase5BlockTimestamp:     new(uint64),
+			ApricotPhasePre6BlockTimestamp:  new(uint64),
+			ApricotPhase6BlockTimestamp:     new(uint64),
+			ApricotPhasePost6BlockTimestamp: new(uint64),
+			BanffBlockTimestamp:             new(uint64),
+			CortinaBlockTimestamp:           new(uint64),
+			DUpgradeBlockTimestamp:          new(uint64),
+			CancunTime:                      new(uint64),
+		},
+		Nonce:      0,
+		Timestamp:  0,
+		ExtraData:  []byte{0x0},
+		GasLimit:   100_000_000,
+		Difficulty: big.NewInt(0),
+		Mixhash:    common.Hash{},
+		Coinbase:   common.Address{},
+		Alloc:      core.GenesisAlloc{},
+		Number:     0,
+		GasUsed:    0,
+		ParentHash: common.Hash{},
+		BaseFee:    big.NewInt(0),
+	}
+}
+
+//func TestVM(ctx *snow.Context, upgradeBytes []byte, configBytes []byte, addresses []common.Address, balance int) (VM,
+//	manager.Manager,
+//	chan engCommon.Message, *engCommon.SenderTest) {
+//	vm := VM{}
+//	db := manager.NewMemDB(&version.Semantic{})
+//	genesis := newPrefundedGenesis(addresses, balance)
+//	genesisBytes, err := json.Marshal(genesis)
+//	if err != nil {
+//		panic(err)
+//	}
+//
+//	toEngine := make(chan engCommon.Message)
+//	sender := &engCommon.SenderTest{}
+//	if err := vm.Initialize(
+//		context.Background(),
+//		ctx,
+//		db,
+//		genesisBytes,
+//		nil,
+//		nil,
+//		toEngine,
+//		nil,
+//		sender,
+//	); err != nil {
+//		panic(err)
+//	}
+//
+//	return vm, db, sender
+//}
+
 // BuildGenesisTest returns the genesis bytes for Coreth VM to be used in testing
 func BuildGenesisTest(t *testing.T, genesisJSON string) []byte {
 	ss := StaticService{}

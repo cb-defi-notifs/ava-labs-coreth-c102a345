@@ -66,7 +66,7 @@ func TestEthTxGossip(t *testing.T) {
 	router := p2p.NewRouter(logging.NoLog{}, peerSender, prometheus.NewRegistry(), "")
 
 	// we're only making client requests, so we don't need a server handler
-	client, err := router.RegisterAppProtocol(ethTxGossipProtocol, nil, nil)
+	client, err := router.RegisterAppProtocol(ethTxPullGossipProtocol, nil, nil)
 	require.NoError(err)
 
 	emptyBloomFilter, err := gossip.NewBloomFilter(txGossipBloomMaxItems, txGossipBloomFalsePositiveRate)
@@ -172,7 +172,7 @@ func TestAtomicTxGossip(t *testing.T) {
 	router := p2p.NewRouter(logging.NoLog{}, peerSender, prometheus.NewRegistry(), "")
 
 	// we're only making client requests, so we don't need a server handler
-	client, err := router.RegisterAppProtocol(atomicTxGossipProtocol, nil, nil)
+	client, err := router.RegisterAppProtocol(atomicTxPullGossipProtocol, nil, nil)
 	require.NoError(err)
 
 	emptyBloomFilter, err := gossip.NewBloomFilter(txGossipBloomMaxItems, txGossipBloomFalsePositiveRate)
