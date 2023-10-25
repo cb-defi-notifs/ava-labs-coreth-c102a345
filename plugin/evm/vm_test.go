@@ -187,36 +187,6 @@ func newGenesis() *core.Genesis {
 	}
 }
 
-//func TestVM(ctx *snow.Context, upgradeBytes []byte, configBytes []byte, addresses []common.Address, balance int) (VM,
-//	manager.Manager,
-//	chan engCommon.Message, *engCommon.SenderTest) {
-//	vm := VM{}
-//	db := manager.NewMemDB(&version.Semantic{})
-//	genesis := newPrefundedGenesis(addresses, balance)
-//	genesisBytes, err := json.Marshal(genesis)
-//	if err != nil {
-//		panic(err)
-//	}
-//
-//	toEngine := make(chan engCommon.Message)
-//	sender := &engCommon.SenderTest{}
-//	if err := vm.Initialize(
-//		context.Background(),
-//		ctx,
-//		db,
-//		genesisBytes,
-//		nil,
-//		nil,
-//		toEngine,
-//		nil,
-//		sender,
-//	); err != nil {
-//		panic(err)
-//	}
-//
-//	return vm, db, sender
-//}
-
 // BuildGenesisTest returns the genesis bytes for Coreth VM to be used in testing
 func BuildGenesisTest(t *testing.T, genesisJSON string) []byte {
 	ss := StaticService{}
