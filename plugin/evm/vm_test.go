@@ -16,24 +16,6 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/exp/slices"
-
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/rlp"
-
-	"github.com/ava-labs/coreth/eth/filters"
-	"github.com/ava-labs/coreth/internal/ethapi"
-	"github.com/ava-labs/coreth/metrics"
-	"github.com/ava-labs/coreth/plugin/evm/message"
-	"github.com/ava-labs/coreth/trie"
-	"github.com/ava-labs/coreth/utils"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
 	"github.com/ava-labs/avalanchego/api/keystore"
 	"github.com/ava-labs/avalanchego/chains/atomic"
 	"github.com/ava-labs/avalanchego/database/manager"
@@ -41,6 +23,7 @@ import (
 	"github.com/ava-labs/avalanchego/ids"
 	"github.com/ava-labs/avalanchego/snow"
 	"github.com/ava-labs/avalanchego/snow/choices"
+	engCommon "github.com/ava-labs/avalanchego/snow/engine/common"
 	"github.com/ava-labs/avalanchego/snow/validators"
 	"github.com/ava-labs/avalanchego/utils/cb58"
 	"github.com/ava-labs/avalanchego/utils/constants"
@@ -54,18 +37,29 @@ import (
 	"github.com/ava-labs/avalanchego/vms/components/avax"
 	"github.com/ava-labs/avalanchego/vms/components/chain"
 	"github.com/ava-labs/avalanchego/vms/secp256k1fx"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"golang.org/x/exp/slices"
 
-	engCommon "github.com/ava-labs/avalanchego/snow/engine/common"
-
+	"github.com/ava-labs/coreth/accounts/abi"
+	accountKeystore "github.com/ava-labs/coreth/accounts/keystore"
 	"github.com/ava-labs/coreth/consensus/dummy"
 	"github.com/ava-labs/coreth/core"
 	"github.com/ava-labs/coreth/core/types"
 	"github.com/ava-labs/coreth/eth"
+	"github.com/ava-labs/coreth/eth/filters"
+	"github.com/ava-labs/coreth/internal/ethapi"
+	"github.com/ava-labs/coreth/metrics"
 	"github.com/ava-labs/coreth/params"
+	"github.com/ava-labs/coreth/plugin/evm/message"
 	"github.com/ava-labs/coreth/rpc"
-
-	"github.com/ava-labs/coreth/accounts/abi"
-	accountKeystore "github.com/ava-labs/coreth/accounts/keystore"
+	"github.com/ava-labs/coreth/trie"
+	"github.com/ava-labs/coreth/utils"
 )
 
 var (
@@ -4154,4 +4148,284 @@ func TestSkipChainConfigCheckCompatible(t *testing.T) {
 	err = reinitVM.Initialize(context.Background(), vm.ctx, dbManager, genesisWithUpgradeBytes, []byte{}, config, issuer, []*engCommon.Fx{}, appSender)
 	require.NoError(t, err)
 	require.NoError(t, reinitVM.Shutdown(context.Background()))
+}
+
+func TestEthTxGossip(t *testing.T) {
+	tests := []struct {
+		name             string
+		sender1, sender2 func(vm1, vm2 *VM) *engCommon.SenderTest
+	}{
+		{
+			name: "push gossip",
+			sender1: func(vm1, vm2 *VM) *engCommon.SenderTest {
+				return &engCommon.SenderTest{
+					SendAppGossipF: func(ctx context.Context, bytes []byte) error {
+						return vm2.AppGossip(ctx, vm1.ctx.NodeID, bytes)
+					},
+				}
+			},
+			sender2: func(vm1, vm2 *VM) *engCommon.SenderTest {
+				return &engCommon.SenderTest{}
+			},
+		},
+		{
+			name: "pull gossip",
+			sender1: func(vm1, vm2 *VM) *engCommon.SenderTest {
+				return &engCommon.SenderTest{
+					SendAppResponseF: func(ctx context.Context, _ ids.NodeID, requestID uint32, bytes []byte) error {
+						return vm2.AppResponse(ctx, vm1.ctx.NodeID, requestID,
+							bytes)
+					},
+				}
+			},
+			sender2: func(vm1, vm2 *VM) *engCommon.SenderTest {
+				return &engCommon.SenderTest{
+					SendAppRequestF: func(ctx context.Context, _ set.Set[ids.NodeID], requestID uint32, bytes []byte) error {
+						go vm1.AppRequest(ctx, vm2.ctx.NodeID, requestID, time.Time{}, bytes)
+						return nil
+					},
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require := require.New(t)
+
+			vm1 := &VM{}
+			vm1SnowCtx := snow.DefaultContextTest()
+
+			vm2 := &VM{}
+			vm2SnowCtx := snow.DefaultContextTest()
+
+			keyFactory := secp256k1.Factory{}
+			pk, err := keyFactory.NewPrivateKey()
+			require.NoError(err)
+			address := GetEthAddress(pk)
+			genesis := newPrefundedGenesis(params.Ether, address)
+			genesisBytes, err := json.Marshal(genesis)
+			require.NoError(err)
+
+			validatorState := &validators.TestState{
+				GetCurrentHeightF: func(ctx context.Context) (uint64, error) {
+					return 0, nil
+				},
+				GetValidatorSetF: func(context.Context, uint64, ids.ID) (map[ids.NodeID]*validators.GetValidatorOutput, error) {
+					return map[ids.NodeID]*validators.GetValidatorOutput{
+						vm1SnowCtx.NodeID: nil,
+						vm2SnowCtx.NodeID: nil,
+					}, nil
+				},
+			}
+
+			vm1SnowCtx.ValidatorState = validatorState
+			vm2SnowCtx.ValidatorState = validatorState
+
+			require.NoError(vm1.Initialize(
+				context.Background(),
+				vm1SnowCtx,
+				manager.NewMemDB(&version.Semantic{}),
+				genesisBytes,
+				nil,
+				nil,
+				make(chan engCommon.Message),
+				nil,
+				tt.sender1(vm1, vm2),
+			))
+			require.NoError(vm1.SetState(context.Background(), snow.NormalOp))
+
+			require.NoError(vm2.Initialize(
+				context.Background(),
+				vm2SnowCtx,
+				manager.NewMemDB(&version.Semantic{}),
+				genesisBytes,
+				nil,
+				nil,
+				make(chan engCommon.Message),
+				nil,
+				tt.sender2(vm1, vm2),
+			))
+			require.NoError(vm2.SetState(context.Background(), snow.NormalOp))
+
+			tx := types.NewTransaction(0, address, big.NewInt(10), 100_000, big.NewInt(params.LaunchMinGasPrice), nil)
+			signedTx, err := types.SignTx(tx, types.NewEIP155Signer(vm1.chainID), pk.ToECDSA())
+			require.NoError(err)
+
+			require.False(vm1.txPool.Has(signedTx.Hash()))
+			require.False(vm2.txPool.Has(signedTx.Hash()))
+
+			require.NoError(vm1.txPool.AddRemote(signedTx))
+			require.True(vm1.txPool.Has(signedTx.Hash()))
+
+			update := make(chan core.NewTxsEvent)
+			vm2.txPool.SubscribeNewTxsEvent(update)
+			<-update
+
+			require.True(vm2.txPool.Has(signedTx.Hash()))
+		})
+	}
+}
+
+func TestAtomicTxGossip(t *testing.T) {
+	tests := []struct {
+		name    string
+		sender1 func(vm1, vm2 *VM, done chan struct{}) *engCommon.SenderTest
+		sender2 func(vm1, vm2 *VM) *engCommon.SenderTest
+	}{
+		{
+			name: "push gossip",
+			sender1: func(vm1, vm2 *VM, done chan struct{}) *engCommon.SenderTest {
+				return &engCommon.SenderTest{
+					SendAppGossipF: func(ctx context.Context, bytes []byte) error {
+						_ = vm2.AppGossip(ctx, vm1.ctx.NodeID, bytes)
+						done <- struct{}{}
+						return nil
+					},
+				}
+			},
+			sender2: func(vm1, vm2 *VM) *engCommon.SenderTest {
+				return &engCommon.SenderTest{}
+			},
+		},
+		{
+			name: "pull gossip",
+			sender1: func(vm1, vm2 *VM, done chan struct{}) *engCommon.SenderTest {
+				return &engCommon.SenderTest{
+					SendAppResponseF: func(ctx context.Context, _ ids.NodeID, requestID uint32, bytes []byte) error {
+						_ = vm2.AppResponse(ctx, vm1.ctx.NodeID, requestID, bytes)
+						done <- struct{}{}
+						return nil
+					},
+				}
+			},
+			sender2: func(vm1, vm2 *VM) *engCommon.SenderTest {
+				return &engCommon.SenderTest{
+					SendAppRequestF: func(ctx context.Context, _ set.Set[ids.NodeID], requestID uint32, bytes []byte) error {
+						go vm1.AppRequest(ctx, vm2.ctx.NodeID, requestID, time.Time{}, bytes)
+						return nil
+					},
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require := require.New(t)
+
+			vm1 := &VM{}
+			vm1SnowCtx := snow.DefaultContextTest()
+
+			vm2 := &VM{}
+			vm2SnowCtx := snow.DefaultContextTest()
+
+			keyFactory := secp256k1.Factory{}
+			pk, err := keyFactory.NewPrivateKey()
+			require.NoError(err)
+			address := GetEthAddress(pk)
+			genesis := newPrefundedGenesis(params.Ether, address)
+			genesisBytes, err := json.Marshal(genesis)
+			require.NoError(err)
+
+			validatorState := &validators.TestState{
+				GetCurrentHeightF: func(ctx context.Context) (uint64, error) {
+					return 0, nil
+				},
+				GetValidatorSetF: func(context.Context, uint64, ids.ID) (map[ids.NodeID]*validators.GetValidatorOutput, error) {
+					return map[ids.NodeID]*validators.GetValidatorOutput{
+						vm1SnowCtx.NodeID: nil,
+						vm2SnowCtx.NodeID: nil,
+					}, nil
+				},
+				GetSubnetIDF: func(context.Context, ids.ID) (ids.ID, error) {
+					return ids.Empty, nil
+				},
+			}
+
+			vm1SnowCtx.ValidatorState = validatorState
+			vm2SnowCtx.ValidatorState = validatorState
+
+			avaxID := ids.GenerateTestID()
+			vm1SnowCtx.AVAXAssetID = avaxID
+			vm2SnowCtx.AVAXAssetID = avaxID
+
+			from := ids.GenerateTestID()
+			to := ids.GenerateTestID()
+
+			vm1SnowCtx.ChainID = from
+			vm2SnowCtx.ChainID = from
+
+			vm1SnowCtx.AVAXAssetID = avaxID
+			vm2SnowCtx.AVAXAssetID = avaxID
+
+			done := make(chan struct{})
+			require.NoError(vm1.Initialize(
+				context.Background(),
+				vm1SnowCtx,
+				manager.NewMemDB(&version.Semantic{}),
+				genesisBytes,
+				nil,
+				nil,
+				make(chan engCommon.Message),
+				nil,
+				tt.sender1(vm1, vm2, done),
+			))
+			require.NoError(vm1.SetState(context.Background(), snow.NormalOp))
+
+			require.NoError(vm2.Initialize(
+				context.Background(),
+				vm2SnowCtx,
+				manager.NewMemDB(&version.Semantic{}),
+				genesisBytes,
+				nil,
+				nil,
+				make(chan engCommon.Message),
+				nil,
+				tt.sender2(vm1, vm2),
+			))
+			require.NoError(vm2.SetState(context.Background(), snow.NormalOp))
+
+			tx := &Tx{
+				UnsignedAtomicTx: &UnsignedExportTx{
+					BlockchainID:     from,
+					DestinationChain: to,
+
+					Ins: []EVMInput{
+						{
+							Address: address,
+							Amount:  1_000_000_000,
+							AssetID: avaxID,
+						},
+					},
+					ExportedOutputs: []*avax.TransferableOutput{
+						{
+							Asset: avax.Asset{ID: avaxID},
+							Out: &secp256k1fx.TransferOutput{
+								Amt: 1,
+								OutputOwners: secp256k1fx.OutputOwners{
+									Locktime:  0,
+									Threshold: 1,
+									Addrs:     []ids.ShortID{pk.Address()},
+								},
+							},
+						},
+					},
+				},
+			}
+
+			require.NoError(tx.Sign(vm1.codec, [][]*secp256k1.PrivateKey{{pk}}))
+			require.NoError(vm1.mempool.AddLocalTx(tx))
+
+			for {
+				// It's possible we aren't served the tx on a given gossip
+				// cycle, so keep polling until we see it.
+				<-done
+
+				if vm2.mempool.has(tx.ID()) {
+					break
+				}
+			}
+		})
+	}
 }
