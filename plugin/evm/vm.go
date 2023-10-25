@@ -1,4 +1,3 @@
-// (c) 2019-2020, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package evm
@@ -1110,6 +1109,9 @@ func (vm *VM) initBlockBuilding() error {
 		vm.shutdownWg.Done()
 	}()
 
+	gossipStats := NewGossipStats()
+	vm.gossipHandler = NewGossipHandler(vm, gossipStats)
+
 	ethTxPushGossipHandler := ethTxPushGossipHandler{
 		NoOpHandler:   p2p.NoOpHandler{},
 		GossipHandler: vm.gossipHandler,
@@ -1132,12 +1134,9 @@ func (vm *VM) initBlockBuilding() error {
 		return err
 	}
 
-	// NOTE: gossip network must be initialized first otherwise ETH tx gossip will not work.
-	gossipStats := NewGossipStats()
 	vm.gossiper = vm.createGossiper(gossipStats, ethTxPushGossipClient, atomicTxPushGossipClient)
 	vm.builder = vm.NewBlockBuilder(vm.toEngine)
 	vm.builder.awaitSubmittedTxs()
-	vm.gossipHandler = NewGossipHandler(vm, gossipStats)
 	vm.Network.SetGossipHandler(vm.gossipHandler)
 
 	return nil

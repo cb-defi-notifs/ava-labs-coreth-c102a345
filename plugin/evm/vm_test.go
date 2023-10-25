@@ -124,7 +124,10 @@ func init() {
 	}
 }
 
-func newPrefundedGenesis(addresses []common.Address, balance int) *core.Genesis {
+func newPrefundedGenesis(
+	balance int,
+	addresses ...common.Address,
+) *core.Genesis {
 	alloc := core.GenesisAlloc{}
 	for _, address := range addresses {
 		alloc[address] = core.GenesisAccount{
