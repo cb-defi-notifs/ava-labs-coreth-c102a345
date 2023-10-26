@@ -552,19 +552,13 @@ type ethTxPushGossipHandler struct {
 }
 
 func (e ethTxPushGossipHandler) AppGossip(_ context.Context, nodeID ids.NodeID, gossipBytes []byte) error {
-	var gossipMsg message.GossipMessage
-	if _, err := e.codec.Unmarshal(gossipBytes, &gossipMsg); err != nil {
-		log.Debug("could not parse gossip message", "nodeID", nodeID, "gossipLen", len(gossipBytes), "err", err)
+	var msg message.EthTxsGossip
+	if _, err := e.codec.Unmarshal(gossipBytes, &msg); err != nil {
+		log.Debug("could not parse eth txs", "nodeID", nodeID, "err", err)
 		return nil
 	}
 
-	ethTx, ok := gossipMsg.(message.EthTxsGossip)
-	if !ok {
-		log.Debug("dropping unknown tx")
-		return nil
-	}
-
-	return e.GossipHandler.HandleEthTxs(nodeID, ethTx)
+	return e.GossipHandler.HandleEthTxs(nodeID, msg)
 }
 
 type atomicTxPushGossipHandler struct {
@@ -575,17 +569,11 @@ type atomicTxPushGossipHandler struct {
 }
 
 func (a atomicTxPushGossipHandler) AppGossip(_ context.Context, nodeID ids.NodeID, gossipBytes []byte) error {
-	var gossipMsg message.GossipMessage
-	if _, err := a.codec.Unmarshal(gossipBytes, &gossipMsg); err != nil {
-		log.Debug("could not parse gossip message", "nodeID", nodeID, "gossipLen", len(gossipBytes), "err", err)
+	var msg message.AtomicTxGossip
+	if _, err := a.codec.Unmarshal(gossipBytes, &msg); err != nil {
+		log.Debug("could not parse atomic tx", "nodeID", nodeID, "err", err)
 		return nil
 	}
 
-	atomicTx, ok := gossipMsg.(message.AtomicTxGossip)
-	if !ok {
-		log.Debug("dropping unknown tx")
-		return nil
-	}
-
-	return a.GossipHandler.HandleAtomicTx(nodeID, atomicTx)
+	return a.GossipHandler.HandleAtomicTx(nodeID, msg)
 }
