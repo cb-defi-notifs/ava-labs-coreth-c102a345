@@ -4173,8 +4173,7 @@ func TestEthTxGossip(t *testing.T) {
 			sender1: func(vm1, vm2 *VM) *engCommon.SenderTest {
 				return &engCommon.SenderTest{
 					SendAppResponseF: func(ctx context.Context, _ ids.NodeID, requestID uint32, bytes []byte) error {
-						return vm2.AppResponse(ctx, vm1.ctx.NodeID, requestID,
-							bytes)
+						return vm2.AppResponse(ctx, vm1.ctx.NodeID, requestID, bytes)
 					},
 				}
 			},
