@@ -310,13 +310,11 @@ func (n *pushGossiper) gossipAtomicTx(tx *Tx) error {
 	)
 	n.stats.IncAtomicGossipSent()
 
-	errs := wrappers.Errs{}
-	errs.Add(
-		n.client.Gossip(msgBytes),
-		n.atomicTxClient.AppGossip(context.TODO(), msgBytes),
-	)
+	if err := n.atomicTxClient.AppGossip(context.TODO(), msgBytes); err != nil {
+		return err
+	}
 
-	return errs.Err
+	return n.client.Gossip(msgBytes)
 }
 
 func (n *pushGossiper) sendEthTxs(txs []*types.Transaction) error {
@@ -343,13 +341,11 @@ func (n *pushGossiper) sendEthTxs(txs []*types.Transaction) error {
 	)
 	n.stats.IncEthTxsGossipSent()
 
-	errs := wrappers.Errs{}
-	errs.Add(
-		n.client.Gossip(msgBytes),
-		n.ethTxClient.AppGossip(context.TODO(), msgBytes),
-	)
+	if err := n.ethTxClient.AppGossip(context.TODO(), msgBytes); err != nil {
+		return err
+	}
 
-	return errs.Err
+	return n.client.Gossip(msgBytes)
 }
 
 func (n *pushGossiper) gossipEthTxs(force bool) (int, error) {
