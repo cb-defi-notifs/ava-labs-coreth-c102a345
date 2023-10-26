@@ -130,8 +130,9 @@ func newPrefundedGenesis(
 	}
 
 	return &core.Genesis{
-		Config: params.TestChainConfig,
-		Alloc:  alloc,
+		Config:     params.TestChainConfig,
+		Difficulty: big.NewInt(0),
+		Alloc:      alloc,
 	}
 }
 
