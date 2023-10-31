@@ -34,22 +34,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ava-labs/avalanchego/api/keystore"
 	"github.com/ava-labs/avalanchego/chains/atomic"
 	"github.com/ava-labs/avalanchego/database"
 	"github.com/ava-labs/avalanchego/database/memdb"
 	"github.com/ava-labs/avalanchego/database/prefixdb"
 	"github.com/ava-labs/avalanchego/ids"
-	"github.com/ava-labs/avalanchego/snow"
 	"github.com/ava-labs/avalanchego/snow/choices"
-	"github.com/ava-labs/avalanchego/snow/validators"
-	"github.com/ava-labs/avalanchego/utils/cb58"
-	"github.com/ava-labs/avalanchego/utils/constants"
-	"github.com/ava-labs/avalanchego/utils/crypto/bls"
 	"github.com/ava-labs/avalanchego/utils/crypto/secp256k1"
-	"github.com/ava-labs/avalanchego/utils/formatting"
 	"github.com/ava-labs/avalanchego/utils/hashing"
-	"github.com/ava-labs/avalanchego/utils/logging"
 	"github.com/ava-labs/avalanchego/utils/set"
 	"github.com/ava-labs/avalanchego/utils/units"
 	"github.com/ava-labs/avalanchego/vms/components/avax"
@@ -65,7 +57,6 @@ import (
 	"github.com/ava-labs/coreth/params"
 	"github.com/ava-labs/coreth/rpc"
 
-	avalancheWarp "github.com/ava-labs/avalanchego/vms/platformvm/warp"
 	"github.com/ava-labs/coreth/accounts/abi"
 	accountKeystore "github.com/ava-labs/coreth/accounts/keystore"
 )
@@ -189,7 +180,8 @@ func setupGenesis(t *testing.T,
 	database.Database,
 	[]byte,
 	chan engCommon.Message,
-	*atomic.Memory) {
+	*atomic.Memory,
+) {
 	if len(genesisJSON) == 0 {
 		genesisJSON = genesisJSONLatest
 	}
@@ -230,7 +222,8 @@ func GenesisVM(t *testing.T,
 ) (chan engCommon.Message,
 	*VM, database.Database,
 	*atomic.Memory,
-	*engCommon.SenderTest) {
+	*engCommon.SenderTest,
+) {
 	vm := &VM{}
 	ctx, db, genesisBytes, issuer, m := setupGenesis(t, genesisJSON)
 	appSender := &engCommon.SenderTest{T: t}
